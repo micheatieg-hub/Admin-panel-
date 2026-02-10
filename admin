@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Admin Panel – The Silent Hour</title>
+<style>
+body {
+  background:#0f1220;
+  color:#eaeaf0;
+  font-family:Inter, Arial, sans-serif;
+  padding:24px;
+}
+.container { max-width:800px; margin:auto; }
+.card {
+  background:#171a2f;
+  padding:28px;
+  border-radius:16px;
+  margin-bottom:24px;
+}
+input, textarea, select, button {
+  width:100%;
+  padding:10px;
+  margin:10px 0;
+  border-radius:8px;
+  border:1px solid #6c7cff;
+  background:#0f1220;
+  color:#eaeaf0;
+}
+button {
+  background:#6c7cff;
+  color:white;
+  border:none;
+  cursor:pointer;
+}
+button:hover { background:#515aff; }
+.hidden { display:none; }
+</style>
+</head>
+<body>
+
+<div class="container">
+
+<h1>🛠 Admin Panel – The Silent Hour</h1>
+
+<!-- LOGIN -->
+<div class="card" id="loginCard">
+  <h2>🔑 Login</h2>
+  <input type="email" id="email" placeholder="Admin Email">
+  <input type="password" id="password" placeholder="Password">
+  <button onclick="login()">Login</button>
+</div>
+
+<!-- ADMIN CONTENT -->
+<div class="card hidden" id="adminContent">
+
+  <button onclick="logout()">Logout</button>
+
+  <h2>➕ Add New Chapter</h2>
+  <input type="text" id="newChapterTitle" placeholder="Chapter Title">
+  <textarea id="newChapterContent" placeholder="Chapter Content"></textarea>
+  <input type="text" id="newChapterLink" placeholder="Chapter HTML Link e.g. chapter4.html">
+  <button onclick="addChapter()">Add Chapter</button>
+
+  <h2>🗑 Delete Chapter</h2>
+  <select id="deleteChapterSelect"></select>
+  <button onclick="deleteChapter()">Delete Chapter</button>
+
+  <h2>🗑 Delete All Comments</h2>
+  <button onclick="deleteAllComments()">Delete All Comments</button>
+
+  <h2>👥 Online Users (<span id="onlineCount">0</span>)</h2>
+  <ul id="onlineUsers"></ul>
+
+</div>
+
+</div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/9.22.2/firebase-app.js";
+import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/9.22.2/firebase-auth.js";
+import { getFirestore, doc, setDoc, getDoc, collection, getDocs, deleteDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore.js";
+
+// Firebase config
+const firebaseConfig = {
+  apiKey: "AIzaSyD9PdBAZzQeZbb4z1_vC-Nlc9v46xVMQ6E",
+  authDomain: "my-novel-app-ce68b.firebaseapp.com",
+  projectId: "my-novel-app-ce68b",
+  storageBucket: "my-novel-app-ce68b.appspot.com",
+  messagingSenderId: "1040625911547",
+  appId: "1:1040625911547:web:0ba4fc967c05664fdd925e",
+  measurementId: "G-76F21G6ZT5"
+};
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+
+const adminEmail = "tiegmicheal@gmail.com";
+
+let chapters = JSON.parse(localStorage.getItem('chapters')) || [];
+
+function renderChapters(){
+  const deleteSelect = document.getElementById('deleteChapterSelect');
+  deleteSelect.innerHTML='';
+  chapters.forEach(ch=>{
+    const opt = document.createElement('option');
+    opt.value = ch.id;
+    opt.textContent = ch.title;
+    deleteSelect.appendChild(opt);
+  });
+  localStorage.setItem('chapters', JSON.stringify(chapters));
+}
+
+// Auth state
+onAuthStateChanged(auth,user=>{
+  if(user && user.email.toLowerCase()===adminEmail.toLowerCase()){
+    loginCard.classList.add('hidden');
+    adminContent.classList.remove('hidden');
+    renderChapters();
+    loadOnlineUsers();
+  } else {
+    loginCard.classList.remove('hidden');
+    adminContent.classList.add('hidden');
+  }
+});
+
+// Login & Logout
+window.login = () => {
+  const emailV = document.getElementById('email').value;
+  const passwordV = document.getElementById('password').value;
+  signInWithEmailAndPassword(auth,emailV,passwordV)
+    .catch(e=>alert(e.message));
+};
+
+window.logout = () => signOut(auth);
+
+// --- Admin Actions ---
+window.addChapter = () => {
+  const title = newChapterTitle.value.trim();
+  const content = newChapterContent.value.trim();
+  const link = newChapterLink.value.trim();
+  if(!title || !content || !link){ alert("Fill all fields"); return; }
+  const id = 'ch'+(chapters.length+1);
+  chapters.push({id,title,link,content});
+  renderChapters();
+  newChapterTitle.value=''; newChapterContent.value=''; newChapterLink.value='';
+  alert("Chapter added");
+};
+
+window.deleteChapter = () => {
+  const id = deleteChapterSelect.value;
+  if(!id) return alert("Select chapter");
+  if(!confirm("Delete this chapter?")) return;
+  chapters = chapters.filter(ch=>ch.id!==id);
+  localStorage.removeItem('comments_'+id);
+  renderChapters();
+  alert("Chapter deleted");
+};
+
+window.deleteAllComments = () => {
+  if(!confirm("Delete all comments?")) return;
+  chapters.forEach(ch=>localStorage.removeItem('comments_'+ch.id));
+  alert("All comments deleted");
+};
+
+// Online Users
+async function loadOnlineUsers(){
+  const ul = document.getElementById('onlineUsers');
+  ul.innerHTML='';
+  let count=0;
+  try{
+    const usersSnap = await getDocs(collection(db,'onlineUsers'));
+    const now = Date.now();
+    usersSnap.forEach(u=>{
+      const data = u.data();
+      if(data.lastActive && data.lastActive.toMillis() > now - 600000){ // last 10 min
+        count++;
+        const li = document.createElement('li');
+        const last = data.lastActive ? new Date(data.lastActive.toMillis()).toLocaleTimeString() : '';
+        li.innerText = data.email + " (Last: "+last+")";
+        ul.appendChild(li);
+      }
+    });
+  }catch(e){ console.log('Cannot load online users', e); }
+  document.getElementById('onlineCount').innerText = count;
+}
+
+</script>
+</body>
+</html>
